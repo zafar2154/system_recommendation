@@ -1,0 +1,62 @@
+import pandas as pd
+import numpy as np
+from gensim.models import Word2Vec
+from sklearn.metrics.pairwise import cosine_similarity
+
+# 1. Load dataset
+df = pd.read_csv("tmdb_5000_movies.csv")
+
+# 2. Pilih kolom teks yang relevan
+df = df[["id", "title", "overview"]].dropna()
+
+# 3. Preprocessing teks
+import re
+from nltk.tokenize import word_tokenize
+from nltk.corpus import stopwords
+import nltk
+
+nltk.download("punkt")
+nltk.download("stopwords")
+nltk.download('punkt_tab')
+def preprocess_text(text):
+    # Hilangkan karakter khusus, ubah huruf kecil, dan tokenisasi
+    text = re.sub(r"[^\w\s]", "", text.lower())
+    tokens = word_tokenize(text)
+    tokens = [t for t in tokens if t not in stopwords.words("english")]
+    return tokens
+
+df["tokens"] = df["overview"].apply(preprocess_text)
+
+# 4. Latih Word2Vec
+# Ukuran embedding dapat disesuaikan (misalnya, 100 atau 300)
+w2v_model = Word2Vec(sentences=df["tokens"], vector_size=100, window=5, min_count=2, workers=4)
+
+# 5. Representasi embedding setiap film
+def get_mean_embedding(tokens, model):
+    embeddings = [model.wv[word] for word in tokens if word in model.wv]
+    if embeddings:
+        return np.mean(embeddings, axis=0)
+    else:
+        return np.zeros(model.vector_size)
+
+df["embedding"] = df["tokens"].apply(lambda x: get_mean_embedding(x, w2v_model))
+
+# 6. Fungsi untuk rekomendasi
+def recommend_movies(title, df, top_n=10):
+    # Ambil embedding film yang dipilih
+    selected_movie = df[df["title"].str.lower() == title.lower()]
+    if selected_movie.empty:
+        return f"Film '{title}' tidak ditemukan."
+    
+    selected_embedding = selected_movie.iloc[0]["embedding"]
+
+    # Hitung dot product untuk kesamaan
+    df["similarity"] = df["embedding"].apply(lambda x: np.dot(selected_embedding, x))
+    recommendations = df.sort_values("similarity", ascending=False).head(top_n)
+
+    return recommendations[["title", "similarity"]]
+
+# 7. Contoh rekomendasi
+movie_title = "The Dark Knight"
+recommendations = recommend_movies(movie_title, df)
+print(recommendations)
